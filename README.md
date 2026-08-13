@@ -47,7 +47,9 @@ gradlew runClient
 
 ## 许可
 
-本项目源码基于 [MIT License](LICENSE) 发布。
+本项目源码基于 **GNU Lesser General Public License v3.0（LGPL-3.0）** 发布，见 [LICENSE](LICENSE)。
+
+Copyright (c) 2026 SiO-0
 
 第三方依赖许可：
 - **GTCEu**：LGPL-3.0，© 其各自作者，见上游 [GregTechCEu/GregTech](https://github.com/GregTechCEu/GregTech)
