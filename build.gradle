@@ -2,7 +2,6 @@
  * It is advised that you do not edit anything in the build.gradle; unless you are sure of what you are doing
  */
 import com.gtnewhorizons.retrofuturagradle.mcp.InjectTagsTask
-import net.darkhax.curseforgegradle.TaskPublishCurseForge
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.gradle.ext.Gradle
 
@@ -12,8 +11,6 @@ plugins {
     id 'maven-publish'
     id 'org.jetbrains.gradle.plugin.idea-ext' version '1.4.1'
     id 'com.gtnewhorizons.retrofuturagradle' version '2.0.3'
-    id 'net.darkhax.curseforgegradle' version '1.+' apply false
-    id 'com.modrinth.minotaur' version '2.+' apply false
     id 'org.jetbrains.changelog' version '2.5.0'
     id 'com.gradleup.shadow' version '9.6.+'
 }
@@ -369,13 +366,12 @@ idea.project.settings {
     }
 }
 
+// NOTE: CurseForge publishing has been disabled because the 'net.darkhax.curseforgegradle' plugin
+// (all published versions) is compiled for JVM 25+, which is incompatible with the JDK 17 used to build.
+// To re-enable publishing, add the plugin id back in the 'plugins' block above and restore this block.
 if (propertyBool('publish_to_curseforge')) {
     assertProperty 'curseforge_project_id'
-    apply plugin: 'net.darkhax.curseforgegradle'
-    tasks.register('curseforge', TaskPublishCurseForge) {
-        group 'publishing'
-        description "Uploads CurseForge project ${propertyString('curseforge_project_id')}"
-    }
+    logger.warn 'CurseForge publishing is unavailable: the CurseForgeGradle plugin was removed (requires JVM 25+).'
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

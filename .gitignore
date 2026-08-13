@@ -23,3 +23,10 @@ build
 # other
 eclipse
 run
+
+# Local build dependencies (GTCEu dev jar, ModularUI jar).
+# Not distributed with this repo - see README.md for where to get them.
+libs
+
+# IDE / editor local configuration
+.vscode

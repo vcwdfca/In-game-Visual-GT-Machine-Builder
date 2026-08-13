@@ -1,6 +1,14 @@
 pluginManagement {
     repositories {
         maven {
+            // Aliyun mirror of the Gradle Plugin Portal.
+            // The official plugins.gradle.org is unreachable from this network
+            // (its Cloudflare traffic is hijacked locally, breaking Java's TLS handshake),
+            // so plugin resolution is routed through this mirror instead.
+            name 'Aliyun Gradle Plugin Mirror'
+            url 'https://maven.aliyun.com/repository/gradle-plugin'
+        }
+        maven {
             // RetroFuturaGradle
             name 'GTNH Maven'
             url 'https://nexus.gtnewhorizons.com/repository/public/'
@@ -9,8 +17,11 @@ pluginManagement {
                 includeGroup 'com.gtnewhorizons.retrofuturagradle'
             }
         }
-        gradlePluginPortal()
-        mavenCentral()
+        maven {
+            // Aliyun mirror of Maven Central (used as fallback for plugin transitive dependencies)
+            name 'Aliyun Maven Central Mirror'
+            url 'https://maven.aliyun.com/repository/central'
+        }
         mavenLocal()
     }
 }

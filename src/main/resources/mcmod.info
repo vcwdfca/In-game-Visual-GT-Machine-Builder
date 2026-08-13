@@ -1,12 +1,12 @@
 [{
-	"modid": "${mod_id}",
-	"name": "${mod_name}",
-	"version": "${mod_version}",
+	"modid": "ivgtmb",
+	"name": "In-game Visual GT Machine Builder",
+	"version": "1.0.0",
 	"mcversion": "1.12.2",
-	"description": "${mod_description}",
-	"authorList": ["${mod_authors}"],
-	"credits": "${mod_credits}",
-	"url": "${mod_url}",
-	"updateJSON": "${mod_update_json}",
-	"logoFile": "${mod_logo_path}"
+	"description": "In-game visual builder for GTCEu machines and multiblocks. Press Y or type /ivgtmb to open the UI.",
+	"authorList": ["SiO-0"],
+	"credits": "",
+	"url": "",
+	"updateJSON": "",
+	"logoFile": ""
 }]
