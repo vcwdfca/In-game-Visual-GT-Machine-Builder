@@ -1166,7 +1166,7 @@ public class BuilderUI extends CustomModularScreen {
     }
 
     /**
-     * SusyHyW-style class name {@code MetaTileEntity<Id>} (PascalCase), e.g.
+     * Class name {@code MetaTileEntity<Id>} (PascalCase), e.g.
      * {@code custom_machine} -> {@code MetaTileEntityCustomMachine}. The exported
      * file must be named after it ({@code MetaTileEntityCustomMachine.groovy})
      * because GroovyScript's classes loader requires file base name == class name.
@@ -1359,9 +1359,9 @@ public class BuilderUI extends CustomModularScreen {
 
     /**
      * Appends recipe map creation / modification into
-     * {@code groovy/prePostInit/ivgtmb_recipemap.groovy}. Written in the SusyHyW
-     * style using {@code new RecipeMap(...)} (no RecipeMapBuilder), so it works in
-     * dev environments too. prePostInit runs before postInit, so custom recipe maps
+     * {@code groovy/prePostInit/ivgtmb_recipemap.groovy}, using
+     * {@code new RecipeMap(...)} (no RecipeMapBuilder), so it works in dev
+     * environments too. prePostInit runs before postInit, so custom recipe maps
      * exist before the machines that reference them are registered.
      */
     private static void exportRecipeMapFile(File minecraftHome) {
@@ -1562,7 +1562,7 @@ public class BuilderUI extends CustomModularScreen {
     /**
      * Single-block machines extend {@code SimpleMachineMetaTileEntity} (or
      * {@code SimpleGeneratorMetaTileEntity} for generators), matching the format
-     * used by GroovyScript-based custom machines (see the susyhyw example files).
+     * used by GroovyScript-based custom machines.
      */
     private static String buildSingleBlockMachineGroovy(String id, String className) {
         boolean generator = currentCategory == CAT_SINGLE_GENERATOR;
