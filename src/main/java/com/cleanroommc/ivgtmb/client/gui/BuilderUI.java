@@ -119,6 +119,8 @@ public class BuilderUI extends CustomModularScreen {
     private static int structZ = 3;
     private static char[][][] grid = new char[3][3][3];
     private static Map<Character, String> letterMap = createDefaultLetterMap();
+    // Letter -> whether its block may be replaced by any hatch/ability (autoAbilities).
+    private static Map<Character, Boolean> replaceableMap = new LinkedHashMap<>();
 
     private static int frontOverlayIndex = 0;
     private static int baseTextureIndex = 0;
@@ -133,6 +135,7 @@ public class BuilderUI extends CustomModularScreen {
     private static String rmItemOutputs = "1";
     private static String rmFluidInputs = "0";
     private static String rmFluidOutputs = "0";
+    private static int rmOverlayIndex = 0;
 
     // Recipe map modification state.
     private static String rmModifyTarget = "";
@@ -308,6 +311,8 @@ public class BuilderUI extends CustomModularScreen {
         structZ = 3;
         grid = new char[3][3][3];
         letterMap = createDefaultLetterMap();
+        replaceableMap.clear();
+        replaceableMap.put('R', true);
         frontOverlayIndex = 0;
         baseTextureIndex = 0;
         pageIndex = 0;
@@ -392,6 +397,23 @@ public class BuilderUI extends CustomModularScreen {
                 .value(new StringValue.Dynamic(() -> rmFluidOutputs, v -> rmFluidOutputs = v))
                 .setNumbers().setMaxLength(4)
                 .fullWidth().height(FIELD_H).marginBottom(4));
+
+        // Overlay choice, similar to the machine creation page.
+        col.child(IKey.lang("ivgtmb.gui.rm_overlay").asWidget().fullWidth().scale(0.7f));
+        col.child(new ButtonWidget<>()
+                .fullWidth().height(BTN_H).marginBottom(4)
+                .overlay(IKey.str(RendererOptions.overlayAt(rmOverlayIndex)))
+                .onMousePressed(b -> {
+                    openSelectionPanel(IKey.lang("ivgtmb.gui.rm_overlay").get(),
+                            RendererOptions.overlays, sel -> {
+                                int idx = RendererOptions.overlays.indexOf(sel);
+                                if (idx >= 0) {
+                                    rmOverlayIndex = idx;
+                                }
+                                refreshLayout();
+                            });
+                    return true;
+                }));
 
         col.child(new ButtonWidget<>()
                 .fullWidth().height(BTN_H).marginTop(4)
@@ -1062,11 +1084,20 @@ public class BuilderUI extends CustomModularScreen {
                 .onMousePressed(b -> {
                     char next = nextLetter();
                     if (next != '?') {
-                        letterMap.put(next, "");
-                        updateRightContent();
-                        if (previewWidget != null) {
-                            previewWidget.setCustomGrid(grid, letterMap);
-                        }
+                        final char fNext = next;
+                        List<String> choices = new ArrayList<>();
+                        choices.add(IKey.lang("ivgtmb.gui.yes").get());
+                        choices.add(IKey.lang("ivgtmb.gui.no").get());
+                        openSelectionPanel(IKey.lang("ivgtmb.gui.letter_replaceable").get(),
+                                choices, sel -> {
+                                    boolean repl = IKey.lang("ivgtmb.gui.yes").get().equals(sel);
+                                    letterMap.put(fNext, "");
+                                    replaceableMap.put(fNext, repl);
+                                    updateRightContent();
+                                    if (previewWidget != null) {
+                                        previewWidget.setCustomGrid(grid, letterMap);
+                                    }
+                                });
                     }
                     return true;
                 }));
@@ -1132,6 +1163,16 @@ public class BuilderUI extends CustomModularScreen {
             upper = false;
         }
         return sb.length() == 0 ? "CustomMachine" : sb.toString();
+    }
+
+    /**
+     * SusyHyW-style class name {@code MetaTileEntity<Id>} (PascalCase), e.g.
+     * {@code custom_machine} -> {@code MetaTileEntityCustomMachine}. The exported
+     * file must be named after it ({@code MetaTileEntityCustomMachine.groovy})
+     * because GroovyScript's classes loader requires file base name == class name.
+     */
+    private static String machineClassName(String id) {
+        return "MetaTileEntity" + toClassName(id);
     }
 
     private void addCategoryButton(ModularPanel panel, int cat, String langKey) {
@@ -1234,8 +1275,12 @@ public class BuilderUI extends CustomModularScreen {
      */
     private static void exportMachineClassFile(File minecraftHome) {
         String id = machineId.isEmpty() ? "custom_machine" : machineId;
+        // The file name must equal the class name (GroovyScript classes loader
+        // derives the expected class from the path, e.g. classes/custom_machine.groovy
+        // must declare `class custom_machine`).
+        String className = machineClassName(id);
         File file = new File(minecraftHome,
-                "groovy" + File.separator + "classes" + File.separator + id + ".groovy");
+                "groovy" + File.separator + "classes" + File.separator + className + ".groovy");
         writeFile(file, buildCustomMachineGroovy(), false);
     }
 
@@ -1246,7 +1291,7 @@ public class BuilderUI extends CustomModularScreen {
     private static void exportMachineRegistration(File minecraftHome) {
         String packId = readPackId(minecraftHome);
         String id = machineId.isEmpty() ? "custom_machine" : machineId;
-        String className = "classes.MetaTileEntity" + toClassName(id);
+        String className = "classes." + machineClassName(id);
         int meta;
         try {
             meta = Integer.parseInt(machineMeta);
@@ -1267,64 +1312,87 @@ public class BuilderUI extends CustomModularScreen {
         // Each registration lives in its own block so appends never clash on
         // local variable names; classes are referenced fully-qualified.
         sb.append("{\n");
-        sb.append("    def registry = GregTechAPI.mteManager.getRegistry('").append(packId).append("')\n");
-        sb.append("    if (registry == null) { registry = GregTechAPI.mteManager.createRegistry('").append(packId)
-                .append("') }\n");
-        if (machineRecipeMap != null && !machineRecipeMap.isEmpty()) {
+        // GTCEu 2.8.10-beta exposes the machine registry directly as
+        // GregTechAPI.MTE_REGISTRY
+        // (a GTControlledRegistry); there is no mteManager / MTEManager in this
+        // version.
+        sb.append("    def registry = GregTechAPI.MTE_REGISTRY\n");
+        boolean rmExists = machineRecipeMap != null && !machineRecipeMap.isEmpty()
+                && RecipeMap.getByName(machineRecipeMap) != null;
+        if (rmExists) {
             sb.append("    def rm = RecipeMap.getByName('").append(machineRecipeMap).append("')\n");
         } else {
-            sb.append("    def rm = null\n");
+            // 机器必须有非空 recipeMap：SimpleMachine/SimpleGenerator 构造、多方块
+            // autoAbilities 与 workable ticking 都依赖它。当用户选择/输入的自定义
+            // recipemap 无效（例如 dev 环境无法用 RecipeMapBuilder 创建）时，回退到
+            // GTCEu 内置的 assembler，保证机器能注册、放置且不崩溃。
+            String requested = machineRecipeMap == null || machineRecipeMap.isEmpty() ? "(none)" : machineRecipeMap;
+            sb.append("    // recipe map '").append(requested).append("' 无效，回退到内置 assembler\n");
+            sb.append("    def rm = RecipeMap.getByName('assembler')\n");
         }
-        sb.append("    registry.register(").append(meta)
-                .append(", new ResourceLocation('").append(packId).append("', '").append(id).append("'), new ")
-                .append(className).append("(new ResourceLocation('").append(packId).append("', '").append(id)
-                .append("')");
+        sb.append("    def mte = new ").append(className).append("(new ResourceLocation('").append(packId)
+                .append("', '").append(id).append("')");
         if (isSingleBlock()) {
             sb.append(", rm, Textures.").append(RendererOptions.overlayAt(frontOverlayIndex))
                     .append(", ").append(tier());
         } else {
             sb.append(", rm");
         }
-        sb.append("))\n");
+        sb.append(")\n");
+        sb.append("    registry.register(").append(meta)
+                .append(", new ResourceLocation('").append(packId).append("', '").append(id).append("'), mte)\n");
+        if (!isSingleBlock()) {
+            // 多方块：加入 JEI 结构预览类别（GTCEu 仅在内部机器注册时调用
+            // registerMultiblock，groovy 注册的机器需手动加入）
+            sb.append("    if (mte instanceof gregtech.api.metatileentity.multiblock.MultiblockControllerBase) {\n");
+            sb.append("        try {\n");
+            sb.append("            def jc = Class.forName('gregtech.integration.jei.multiblock.MultiblockInfoCategory')\n");
+            sb.append("            // Direct dynamic call (no java.lang.reflect.Method, which the\n");
+            sb.append("            // GroovyScript sandbox blacklists)\n");
+            sb.append("            jc.registerMultiblock(mte)\n");
+            sb.append("        } catch (Throwable ignored) {}\n");
+            sb.append("    }\n");
+        }
         sb.append("}\n\n");
         writeFile(file, sb.toString(), !newFile);
     }
 
     /**
      * Appends recipe map creation / modification into
-     * {@code groovy/postInit/ivgtmb_recipemap.groovy}.
+     * {@code groovy/prePostInit/ivgtmb_recipemap.groovy}. Written in the SusyHyW
+     * style using {@code new RecipeMap(...)} (no RecipeMapBuilder), so it works in
+     * dev environments too. prePostInit runs before postInit, so custom recipe maps
+     * exist before the machines that reference them are registered.
      */
     private static void exportRecipeMapFile(File minecraftHome) {
         File file = new File(minecraftHome,
-                "groovy" + File.separator + "postInit" + File.separator + "ivgtmb_recipemap.groovy");
+                "groovy" + File.separator + "prePostInit" + File.separator + "ivgtmb_recipemap.groovy");
         boolean newFile = !file.exists();
         StringBuilder sb = new StringBuilder();
         if (newFile) {
             sb.append("// Generated by In-game Visual GT Machine Builder\n");
             sb.append("import gregtech.api.recipes.RecipeMap\n");
-            sb.append("import gregtech.api.recipes.RecipeMapBuilder\n");
-            sb.append("import gregtech.api.recipes.builders.SimpleRecipeBuilder\n");
+            sb.append("import gregtech.api.recipes.builders.SimpleRecipeBuilder\n\n");
         }
         if (rmId != null && !rmId.isEmpty()) {
-            sb.append("{\n");
-            sb.append("    new RecipeMapBuilder<>('").append(rmId).append("', new SimpleRecipeBuilder())\n");
-            sb.append("            .itemInputs(").append(parseInt(rmItemInputs, 1)).append(')')
-                    .append(".itemOutputs(").append(parseInt(rmItemOutputs, 1)).append(')')
-                    .append(".fluidInputs(").append(parseInt(rmFluidInputs, 0)).append(')')
-                    .append(".fluidOutputs(").append(parseInt(rmFluidOutputs, 0)).append(')')
-                    .append("\n            .build()\n");
-            sb.append("}\n\n");
+            sb.append("// 创建新 recipemap（").append(parseInt(rmItemInputs, 1)).append(" 物品入 / ")
+                    .append(parseInt(rmItemOutputs, 1)).append(" 物品出 / ")
+                    .append(parseInt(rmFluidInputs, 0)).append(" 流体入 / ")
+                    .append(parseInt(rmFluidOutputs, 0)).append(" 流体出）\n");
+            sb.append("// Overlay: ").append(RendererOptions.overlayAt(rmOverlayIndex)).append('\n');
+            sb.append("new RecipeMap('").append(rmId).append("', ")
+                    .append(parseInt(rmItemInputs, 1)).append(", ")
+                    .append(parseInt(rmItemOutputs, 1)).append(", ")
+                    .append(parseInt(rmFluidInputs, 0)).append(", ")
+                    .append(parseInt(rmFluidOutputs, 0)).append(", new SimpleRecipeBuilder(), false)\n\n");
         }
         if (rmModifyTarget != null && !rmModifyTarget.isEmpty()) {
-            sb.append("{\n");
-            sb.append("    // Modify existing recipe map '").append(rmModifyTarget).append("'\n");
-            sb.append("    new RecipeMapBuilder<>('").append(rmModifyTarget).append("', new SimpleRecipeBuilder())\n");
-            sb.append("            .itemInputs(").append(parseInt(rmModifyItemInputs, 1)).append(')')
-                    .append(".itemOutputs(").append(parseInt(rmModifyItemOutputs, 1)).append(')')
-                    .append(".fluidInputs(").append(parseInt(rmModifyFluidInputs, 0)).append(')')
-                    .append(".fluidOutputs(").append(parseInt(rmModifyFluidOutputs, 0)).append(')')
-                    .append("\n            .build()\n");
-            sb.append("}\n\n");
+            sb.append("// 修改已有 recipemap '").append(rmModifyTarget).append("'\n");
+            sb.append("def rm = RecipeMap.getByName('").append(rmModifyTarget).append("')\n");
+            sb.append("rm.setMaxInputs(").append(parseInt(rmModifyItemInputs, 1)).append(")\n");
+            sb.append("rm.setMaxOutputs(").append(parseInt(rmModifyItemOutputs, 1)).append(")\n");
+            sb.append("rm.setMaxFluidInputs(").append(parseInt(rmModifyFluidInputs, 0)).append(")\n");
+            sb.append("rm.setMaxFluidOutputs(").append(parseInt(rmModifyFluidOutputs, 0)).append(")\n\n");
         }
         if ((rmId != null && !rmId.isEmpty()) || (rmModifyTarget != null && !rmModifyTarget.isEmpty())) {
             writeFile(file, sb.toString(), !newFile);
@@ -1416,7 +1484,7 @@ public class BuilderUI extends CustomModularScreen {
 
     private static String buildCustomMachineGroovy() {
         String id = machineId.isEmpty() ? "custom_machine" : machineId;
-        String className = "MetaTileEntity" + toClassName(id);
+        String className = machineClassName(id);
         if (isSingleBlock()) {
             return buildSingleBlockMachineGroovy(id, className);
         }
@@ -1435,15 +1503,19 @@ public class BuilderUI extends CustomModularScreen {
         sb.append("import gregtech.client.renderer.ICubeRenderer\n");
         sb.append("import gregtech.client.renderer.texture.Textures\n");
         sb.append("import net.minecraft.block.state.IBlockState\n");
-        sb.append("import net.minecraft.util.ResourceLocation\n\n");
-        sb.append("// Machine id: ").append(id).append('\n');
-        sb.append("// Machine meta: ").append(machineMeta).append('\n');
-        sb.append("// Structure: ").append(structX).append('x').append(structY).append('x')
-                .append(structZ).append('\n');
-        sb.append("// Recipe map: ").append(machineRecipeMap.isEmpty() ? "(none)" : machineRecipeMap).append('\n');
-        sb.append("// Parallel: ").append(machineParallel).append('\n');
-        sb.append("// Front overlay: ").append(RendererOptions.overlayAt(frontOverlayIndex)).append('\n');
-        sb.append("// Base texture: ").append(RendererOptions.baseTextureAt(baseTextureIndex)).append('\n');
+        sb.append("import net.minecraft.item.ItemStack\n");
+        sb.append("import net.minecraft.util.ResourceLocation\n");
+        sb.append("import net.minecraft.util.text.TextFormatting\n");
+        sb.append("import net.minecraft.world.World\n\n");
+        sb.append("/**\n");
+        sb.append(" * 自定义多方块机器: ").append(id).append("（").append(className).append("）\n");
+        sb.append(" * 配方表: ").append(machineRecipeMap.isEmpty() ? "(none)" : machineRecipeMap).append('\n');
+        sb.append(" * 结构: ").append(structX).append('x').append(structY).append('x')
+                .append(structZ).append("（宽x高x深）\n");
+        sb.append(" * 并行: ").append(machineParallel).append("x\n");
+        sb.append(" * 正面叠加层: ").append(RendererOptions.overlayAt(frontOverlayIndex)).append('\n');
+        sb.append(" * 基础纹理: ").append(RendererOptions.baseTextureAt(baseTextureIndex)).append('\n');
+        sb.append(" */\n");
         sb.append("class ").append(className).append(" extends RecipeMapMultiblockController {\n\n");
         sb.append("    ").append(className).append("(ResourceLocation metaTileEntityId, RecipeMap<?> recipeMap) {\n");
         sb.append("        super(metaTileEntityId, recipeMap)\n");
@@ -1464,6 +1536,14 @@ public class BuilderUI extends CustomModularScreen {
         sb.append("    protected ICubeRenderer getFrontOverlay() {\n");
         sb.append("        return Textures.").append(RendererOptions.overlayAt(frontOverlayIndex)).append('\n');
         sb.append("    }\n");
+        if (hasParallel) {
+            sb.append("\n    @Override\n");
+            sb.append(
+                    "    void addInformation(ItemStack stack, World player, List<String> tooltip, boolean advanced) {\n");
+            sb.append("        super.addInformation(stack, player, tooltip, advanced)\n");
+            sb.append("        tooltip.add(TextFormatting.AQUA.toString() + '").append(parallel()).append(" 并行')\n");
+            sb.append("    }\n");
+        }
         if (hasParallel) {
             sb.append("\n    private class ").append(className).append("RecipeLogic extends MultiblockRecipeLogic {\n");
             sb.append("        ").append(className).append("RecipeLogic(RecipeMapMultiblockController tileEntity) {\n");
@@ -1533,6 +1613,25 @@ public class BuilderUI extends CustomModularScreen {
      * {@code any()}. The {@code R} letter additionally allows any hatch/ability,
      * and spaces in the grid resolve to air.
      */
+    private static String normalizeBlockstateExpr(String desc) {
+        if (desc.startsWith("blockstate(")) {
+            // Full GroovyScript expression, e.g.
+            // blockstate('gregtech:metal_casing', 'variant=coke_bricks')
+            return desc;
+        }
+        // Legacy 'blockName prop=value' form -> blockstate('blockName', 'prop=value')
+        StringBuilder sb = new StringBuilder("blockstate(");
+        String[] parts = desc.split(" ");
+        sb.append('\'').append(parts[0].trim()).append('\'');
+        for (int i = 1; i < parts.length; i++) {
+            String p = parts[i].trim();
+            if (!p.isEmpty()) {
+                sb.append(", '").append(p).append('\'');
+            }
+        }
+        return sb.append(')').toString();
+    }
+
     private static String buildStructurePatternGroovy() {
         StringBuilder sb = new StringBuilder();
         sb.append("    @Override\n");
@@ -1553,9 +1652,10 @@ public class BuilderUI extends CustomModularScreen {
                 sb.append("        TraceabilityPredicate ").append(var).append(" = autoAbilities()\n");
             } else {
                 // Resolve the block via its block state, e.g.
-                // states(blockstate('minecraft:stone'))
+                // states(blockstate('minecraft:stone')). A legacy 'blockName
+                // prop=value' description is wrapped into blockstate(...) here.
                 sb.append("        TraceabilityPredicate ").append(var)
-                        .append(" = states(").append(trimmed).append(")\n");
+                        .append(" = states(").append(normalizeBlockstateExpr(trimmed)).append(")\n");
             }
             if (c == 'R') {
                 // R = 可替换仓室方块（可被任意输入/输出仓、能源舱替换）
@@ -1598,9 +1698,11 @@ public class BuilderUI extends CustomModularScreen {
         for (Map.Entry<Character, String> e : named.entrySet()) {
             char c = e.getKey();
             String pred = e.getValue();
-            if (c == 'R') {
-                // R 可被任意仓室/舱口替换
-                sb.append("                .where('R' as char, ").append(pred).append(".or(autoAbilities()))\n");
+            if (c == 'R' || Boolean.TRUE.equals(replaceableMap.get(c))) {
+                // 该字母可被任意输入/输出仓、能源舱替换；导出注册已保证 recipeMap 非空
+                // （无效时回退内置 assembler），因此 autoAbilities() 始终可用。
+                sb.append("                .where('").append(c).append("' as char, ")
+                        .append(pred).append(".or(autoAbilities()))\n");
             } else {
                 sb.append("                .where('").append(c).append("' as char, ")
                         .append(pred).append(")\n");

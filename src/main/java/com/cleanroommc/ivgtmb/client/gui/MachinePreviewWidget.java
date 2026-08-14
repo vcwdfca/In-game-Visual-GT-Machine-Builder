@@ -46,6 +46,7 @@ import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.init.Blocks;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -55,6 +56,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -236,8 +238,11 @@ public class MachinePreviewWidget extends Widget<MachinePreviewWidget> {
         world.addBlocks(blockMap);
 
         ImmediateWorldSceneRenderer sceneRenderer = new ImmediateWorldSceneRenderer(world);
-        sceneRenderer.addRenderedBlocks(world.renderedBlocks, (isTransparent, pass, layer) -> {
-        });
+        // Pass a null scene hook: GTCEu's WorldSceneRenderer only calls
+        // setDefaultPassRenderState (which configures the GL depth/blend state) when
+        // the hook is null. A non-null hook skips it, leaving GL state wrong so
+        // regular (non-TESR) blocks are rendered invisibly.
+        sceneRenderer.addRenderedBlocks(world.renderedBlocks, null);
         sceneRenderer.setClearColor(0xFF333333);
 
         Vector3f size = world.getSize();
@@ -321,6 +326,9 @@ public class MachinePreviewWidget extends Widget<MachinePreviewWidget> {
             holderClass.getMethod("setPos", BlockPos.class).invoke(holder, pos);
             MetaTileEntity preview = new PreviewMultiblock(new ResourceLocation("ivgtmb", "preview"), base, overlay,
                     tier);
+            // Face the front of the machine towards the camera (+Z) so the preview shows
+            // the same front as the placed machine instead of its back.
+            preview.setFrontFacing(EnumFacing.SOUTH);
             Method setMte = holderClass.getMethod("setMetaTileEntity", MetaTileEntity.class);
             setMte.invoke(holder, preview);
             return new BlockInfo(state, (TileEntity) holder);
@@ -399,7 +407,14 @@ public class MachinePreviewWidget extends Widget<MachinePreviewWidget> {
      * default state when no properties are given.
      */
     private static IBlockState parseBlockState(String desc) {
-        String[] parts = desc.trim().split(" ");
+        String[] parts;
+        if (desc.trim().startsWith("blockstate(")) {
+            // Full GroovyScript expression, e.g.
+            // blockstate('gregtech:metal_casing', 'variant=coke_bricks')
+            parts = parseBlockstateArgs(desc);
+        } else {
+            parts = desc.trim().split(" ");
+        }
         String blockName = parts[0];
         String[] props = new String[parts.length - 1];
         System.arraycopy(parts, 1, props, 0, props.length);
@@ -442,6 +457,47 @@ public class MachinePreviewWidget extends Widget<MachinePreviewWidget> {
     }
 
     /**
+     * Parses the arguments of a GroovyScript {@code blockstate(...)} expression such
+     * as {@code blockstate('gregtech:metal_casing', 'variant=coke_bricks')} into the
+     * same {@code [blockName, prop=value, ...]} form used by
+     * {@link #parseBlockState}. Also tolerates single- or double-quoted arguments
+     * and a trailing {@code block:meta} form.
+     */
+    private static String[] parseBlockstateArgs(String desc) {
+        int open = desc.indexOf('(');
+        int close = desc.lastIndexOf(')');
+        String inner = (open >= 0 && close > open) ? desc.substring(open + 1, close) : desc;
+        List<String> args = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        boolean inQuote = false;
+        char quote = 0;
+        for (int i = 0; i < inner.length(); i++) {
+            char ch = inner.charAt(i);
+            if (inQuote) {
+                if (ch == quote) {
+                    inQuote = false;
+                } else {
+                    cur.append(ch);
+                }
+            } else if (ch == '\'' || ch == '"') {
+                inQuote = true;
+                quote = ch;
+            } else if (ch == ',') {
+                if (cur.length() > 0) {
+                    args.add(cur.toString().trim());
+                    cur.setLength(0);
+                }
+            } else {
+                cur.append(ch);
+            }
+        }
+        if (cur.length() > 0) {
+            args.add(cur.toString().trim());
+        }
+        return args.toArray(new String[0]);
+    }
+
+    /**
      * Resolves a GTCEu block such as
      * {@code gregtech:metal_casing variant=coke_bricks}
      * by scanning the static fields of {@code gregtech.common.blocks.MetaBlocks}.
@@ -463,16 +519,31 @@ public class MachinePreviewWidget extends Widget<MachinePreviewWidget> {
                 if (rl == null || !rl.getPath().equals(path)) {
                     continue;
                 }
+                IBlockState state = b.getDefaultState();
                 for (String p : props) {
                     String[] kv = p.split("=");
-                    if (kv.length == 2 && kv[0].trim().equalsIgnoreCase("variant")) {
-                        IBlockState s = getStateByVariant(b, kv[1].trim());
-                        if (s != null) {
-                            return s;
+                    if (kv.length == 2) {
+                        String propName = kv[0].trim();
+                        String propValue = kv[1].trim();
+                        // VariantBlock.getState(T) erases T to Object, so reflection on
+                        // a getState(Enum) method fails; apply the variant property through
+                        // the standard property pipeline as a fallback.
+                        if (propName.equalsIgnoreCase("variant")) {
+                            IBlockState s = getStateByVariant(b, propValue);
+                            if (s != null) {
+                                state = s;
+                                continue;
+                            }
+                        }
+                        for (IProperty<?> prop : state.getPropertyKeys()) {
+                            if (prop.getName().equals(propName)) {
+                                state = applyProperty(state, prop, propValue);
+                                break;
+                            }
                         }
                     }
                 }
-                return b.getDefaultState();
+                return state;
             }
         } catch (Exception ignored) {
             // fall through to the standard block-state resolution below
